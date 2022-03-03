@@ -1,0 +1,30 @@
+<dict>
+	<key>DaysTillExpiration</key>
+	<integer>180</integer>
+	<key>FirstPass</key>
+	<string>Lapt0padm1n</string>
+	<key>LocalAdminAccount</key>
+	<string>tracelinkadmin</string>
+	<key>Method</key>
+	<string>Local</string>
+	<key>PasswordGrouping</key>
+	<integer>4</integer>
+	<key>PasswordLength</key>
+	<integer>14</integer>
+	<key>PasswordSeparator</key>
+	<string>-</string>
+	<key>PayloadDisplayName</key>
+	<string>macOS LAPS</string>
+	<key>PayloadIdentifier</key>
+	<string>edu.psu.macoslaps</string>
+	<key>PayloadType</key>
+	<string>edu.psu.macoslaps</string>
+	<key>PayloadUUID</key>
+	<string></string>
+	<key>PayloadVersion</key>
+	<integer>1</integer>
+	<key>RemoveKeyChain</key>
+	<true/>
+	<key>RemovePassChars</key>
+	<string></string>
+</dict>
