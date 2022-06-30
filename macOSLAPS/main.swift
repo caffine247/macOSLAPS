@@ -11,17 +11,17 @@
 ///  -------------------------
 ///  Joshua D. Miller - josh.miller@outlook.com
 ///  
-///  Last Updated March 17, 2021
+///  Last Updated June 20, 2022
 ///  -------------------------
 
 import Foundation
 
 struct Constants {
-    // Begin by setting our
+    // Begin by tying date_formatter() to a variable
     static let dateFormatter = date_formatter()
     // Read Command Line Arugments into array to use later
     static let arguments : Array = CommandLine.arguments
-    // Retrieve our configuration for thte application or use the
+    // Retrieve our configuration for the application or use the
     // default values
     static let local_admin = GetPreference(preference_key: "LocalAdminAccount") as! String
     static let password_length = GetPreference(preference_key: "PasswordLength") as! Int
@@ -30,8 +30,12 @@ struct Constants {
     static let characters_to_remove = GetPreference(preference_key: "RemovePassChars") as! String
     static let character_exclusion_sets = GetPreference(preference_key: "ExclusionSets") as? Array<String>
     static let preferred_domain_controller = GetPreference(preference_key: "PreferredDC") as! String
-    static let first_password = GetPreference(preference_key: "FirstPass") as! String
+    static var first_password = GetPreference(preference_key: "FirstPass") as! String
     static let method = GetPreference(preference_key: "Method") as! String
+    static let passwordrequirements = GetPreference(preference_key: "PasswordRequirements") as! Dictionary<String, Any>
+    // Constant values if triggering a password reset / specifying a First Password
+    static var pw_reset : Bool = false
+    static var use_firstpass : Bool = false
 }
 
 func macOSLAPS() {
@@ -41,8 +45,9 @@ func macOSLAPS() {
         laps_log.print("macOSLAPS needs to be run as root to ensure the password change for \(Constants.local_admin) if needed.", .error)
         exit(77)
     }
+    let output_dir = "/var/root/Library/Application Support"
     // Remove files from extracting password if they exist
-    if FileManager.default.fileExists(atPath: "/var/root/Library/Application Support/macOSLAPS-password") {
+    if FileManager.default.fileExists(atPath: "\(output_dir)/macOSLAPS-password") {
         do {
             try FileManager.default.removeItem(atPath: "/var/root/Library/Application Support/macOSLAPS-password")
             try FileManager.default.removeItem(atPath: "/var/root/Library/Application Support/macOSLAPS-expiration")
@@ -50,7 +55,6 @@ func macOSLAPS() {
             laps_log.print("Unable to remove files used for extraction of password for MDM. Please delete manually", .warn)
         }
     }
-    var pw_reset : Bool = false
     // Iterate through supported Arguments
     for argument in Constants.arguments {
         switch argument {
@@ -60,29 +64,87 @@ func macOSLAPS() {
             exit(0)
         case "-getPassword":
             if Constants.method == "Local" {
-                let (current_password, _) = KeychainService.loadPassword(service: "macOSLAPS")
-                if current_password == nil {
-                    laps_log.print("Unable to retrieve password from macOSLAPS Keychain entry", .error)
+                let (current_password, keychain_item_check) = KeychainService.loadPassword(service: "macOSLAPS")
+                if current_password == nil && keychain_item_check == nil {
+                    laps_log.print("Unable to retrieve password from macOSLAPS Keychain entry.", .error)
+                    exit(1)
+                } else if current_password == nil && keychain_item_check == "Not Found" {
+                    laps_log.print("There does not appear to be a macOSLAPS Keychain Entry. Most likely, a password change has never been performed or the first password change has failed due to an incorrect password", .error)
                     exit(1)
                 } else {
                     do {
+                        // Verify Password
+                        let password_verify_status = Shell.run(launchPath: "/usr/bin/dscl", arguments: [".", "-authonly", Constants.local_admin, current_password!])
+                        if password_verify_status == "" {
+                            laps_log.print("Password has been verified to work. Extracting...", .info)
+                        } else {
+                            laps_log.print("Password cannot be verified. The password is out of sync. Please run sysadminctl to perform a reset to restart rottation", .error)
+                            exit(1)
+                        }
                         let current_expiration_date = LocalTools.get_expiration_date()
                         let current_expiration_string = Constants.dateFormatter.string(for: current_expiration_date)
+                        // Verify our output Directory exists and if not create it
+                        var isDir:ObjCBool = true
                         // Write contents to file
+                        if !FileManager.default.fileExists(atPath: output_dir, isDirectory: &isDir) {
+                            do {
+                                laps_log.print("Creating directory \(output_dir) as it does not currently exist. This issue was first present in macOS 12.2.1 on Apple Silicon", .warn)
+                                try FileManager.default.createDirectory(atPath: output_dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755, .ownerAccountID: 0, .groupOwnerAccountID: 0])
+                                laps_log.print("Directory \(output_dir) has been created. Continuing...")
+                            } catch {
+                                laps_log.print("An error occured attempting to create the directory \(output_dir). Unable to extract password. Exiting...")
+                                exit(0)
+                            }
+                        }
                         try current_password!.write(toFile: "/var/root/Library/Application Support/macOSLAPS-password", atomically: true, encoding: String.Encoding.utf8)
                         try current_expiration_string!.write(toFile: "/var/root/Library/Application Support/macOSLAPS-expiration", atomically: true, encoding: String.Encoding.utf8)
+                        exit(0)
                     }
                     catch let error as NSError {
                         laps_log.print("Unable to extract password from keychain. Error: \(error)", .error)
                     }
-                    exit(0)
+                    exit(1)
                 }
             } else {
                 laps_log.print("Will not display password as our current method is Active Directory", .warn)
                 exit(0)
             }
         case "-resetPassword":
-            pw_reset = true
+            Constants.pw_reset = true
+            
+        case "-help":
+            print("""
+                  macOSLAPS Help
+                  ==============
+                  
+                  These are the arguments that you can use with macOSLAPS. You may only use one argument at a time.
+                  
+                  -version          Prints Current Version of macOSLAPS and gracefully exits
+                  
+                  -getPassword      If using the Local method, the password will be outputted
+                                    to the filesystem temporarily. Password is deleted upon
+                                    next automated or manual run
+                  
+                  -resetPassword    Forces a password reset no matter the expiration date
+                  -firstPass        Performs a password reset using the FirstPass Configuration
+                                    Profile key or the password you specify after this flag.
+                                    The password of the admin MUST be this password or the
+                                    change WILL FAIL.
+                  
+                  -help             Displays this screen
+                  """)
+            exit(0)
+        case "-firstPass":
+            Constants.pw_reset = true
+            Constants.use_firstpass = true
+            if Constants.first_password == "" {
+                Constants.first_password = CommandLine.arguments[2]
+            }
+            if Constants.first_password == "" {
+                laps_log.print("No password is specified via the FirstPass key OR in the command line. Exiting...", .error)
+                exit(1)
+            }
+            laps_log.print("the -firstPass argument was invoked. Using the Configuration Profile specified password or the argument password that was specified.", .info)
         default:
             continue
         }
@@ -93,7 +155,7 @@ func macOSLAPS() {
         let ad_computer_record = ADTools.connect()
         // Get Expiration Time from Active Directory
         var ad_exp_time = ""
-        if pw_reset == true {
+        if Constants.pw_reset == true {
             ad_exp_time = "126227988000000000"
         } else {
             ad_exp_time = ADTools.check_pw_expiration(computer_record: ad_computer_record)!
@@ -119,7 +181,7 @@ func macOSLAPS() {
         // the password somewhere
         // Load the Keychain Item and compare the date
         var exp_date : Date?
-        if pw_reset == true {
+        if Constants.pw_reset == true {
             exp_date = Calendar.current.date(byAdding: .day, value: -7, to: Date())
         } else {
             exp_date = LocalTools.get_expiration_date()

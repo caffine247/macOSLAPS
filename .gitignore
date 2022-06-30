@@ -1,2 +1,16 @@
+## User settings
+xcuserdata/
+*.hmap
+*.ipa
+*.xcworkspace
+*.xcuserstate
+*xcworkspace/xcuserdata/*
 
-macOSLAPS/.DS_Store
+## Xcode 8 and earlier
+*.xcscmblueprint
+*.xccheckout
+
+## macOS Files
+.DS_Store
+.Trashes
+*.swp
